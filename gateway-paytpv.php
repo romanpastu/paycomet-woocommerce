@@ -211,7 +211,16 @@ function custom_display_checkout_error_message() {
             $error_description,
             $error_code
         );
-		if ( true === WP_DEBUG ) {
+		
+		// Use WooCommerce logger if available
+		if ( function_exists( 'wc_get_logger' ) ) {
+			$settings = get_option('woocommerce_paytpv_settings', array());
+			if ( isset( $settings['enable_logging'] ) && $settings['enable_logging'] === 'yes' ) {
+				$logger = wc_get_logger();
+				$log_source = 'paycomet-' . date( 'Y-m-d' );
+				$logger->log( 'error', 'Checkout error for order #' . $order_id . ': ' . $error_txt, array( 'source' => $log_source ) );
+			}
+		} elseif ( true === WP_DEBUG ) {
 			error_log($error_txt);
 		}
 		

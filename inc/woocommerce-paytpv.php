@@ -7,15 +7,32 @@
 	class woocommerce_paytpv extends WC_Payment_Gateway
 	{
 
-        public function write_log( $log )
+        public function write_log( $log, $level = 'info' )
         {
-			if ( true === WP_DEBUG ) {
-				if ( is_array($log) || is_object($log)) {
-					error_log(print_r($log, true));
-				} else {
-					error_log($log);
-				}
+			// Check if logging is enabled
+			if ( ! isset( $this->settings ) || ! isset( $this->settings['enable_logging'] ) || $this->settings['enable_logging'] !== 'yes' ) {
+				return;
 			}
+
+			// Only proceed if WooCommerce logger is available
+			if ( ! function_exists( 'wc_get_logger' ) ) {
+				return;
+			}
+
+			$logger = wc_get_logger();
+			
+			// Create log context with source
+			$log_source = 'paycomet-' . date( 'Y-m-d' );
+			
+			// Format the log message
+			if ( is_array( $log ) || is_object( $log ) ) {
+				$message = print_r( $log, true );
+			} else {
+				$message = $log;
+			}
+
+			// Write to log with appropriate level
+			$logger->log( $level, $message, array( 'source' => $log_source ) );
 		}
 
 		public $id;
@@ -197,7 +214,7 @@
 							$error_txt = __( 'An error has occurred. Please verify the data entered and try again', 'wc_paytpv' );
 						}
 						print '<p>' . $error_txt .'</p>';
-						$gateway->write_log('Error ' . $apiResponse->errorCode . " en form");
+						$gateway->write_log('Error ' . $apiResponse->errorCode . " en form", 'error');
 						exit;
 					}
 				} catch (exception $e){
@@ -206,7 +223,7 @@
 
 			} else {
 				print '<p>' . __( 'Error: ', 'wc_paytpv' ) . "1004" .'</p>';
-				$gateway->write_log('Error 1004. ApiKey vacía');
+				$gateway->write_log('Error 1004. ApiKey vacía', 'error');
 				exit;
 			}
 
@@ -257,7 +274,7 @@
 					//}
 				}
 			} else {
-				$this->write_log('Error 1004. ApiKey vacía');
+				$this->write_log('Error 1004. ApiKey vacía', 'error');
 				print '<p>' . __( 'Error: ', 'wc_paytpv' ) . "1004" .'</p>';
 			}
 		}
@@ -559,6 +576,14 @@
 						1 => __( 'Yes', 'wc_paytpv' )
 					),
 					'default' => '0',
+					'desc_tip'    => true
+				),
+				'enable_logging' => array(
+					'title' => __( 'Enable Logging', 'wc_paytpv' ),
+					'label' => __( 'Enable logging for PAYCOMET payment gateway', 'wc_paytpv' ),
+					'type' => 'checkbox',
+					'description' => __( 'Log payment events and errors. Logs can be viewed in WooCommerce > Settings > Logs.', 'wc_paytpv' ),
+					'default' => 'no',
 					'desc_tip'    => true
 				)
 			);
@@ -968,6 +993,9 @@
 							$order->add_order_note( __( 'PAYCOMET payment completed', 'woocommerce' ) );
 							$order->payment_complete($_REQUEST[ 'AuthCode' ]);
 
+							// Log successful payment
+							$this->write_log('Payment notification received - SUCCESS for order #' . $order->get_id() . ' - Amount: ' . ($_REQUEST['Amount'] / 100) . ' - AuthCode: ' . $_REQUEST['AuthCode'] . ' - Order Reference: ' . $_REQUEST['Order']);
+
 							if ( class_exists( 'Automattic\WooCommerce\Utilities\OrderUtil' ) && OrderUtil::custom_orders_table_usage_is_enabled() ) {
 								$order->update_meta_data('PayTPV_Referencia', $_REQUEST[ 'Order' ] );
 								$order->update_meta_data('ErrorID', 0 );
@@ -993,12 +1021,21 @@
 							if (isset($_REQUEST['ErrorID']) && $_REQUEST['ErrorID']>0) {
 								
 								// Si el pedido está en processing o completado no hacemos nada si nos llega luego un KO
-								if($order->get_status() == 'processing' || $order->get_status() == 'completed'){									
+								if($order->get_status() == 'processing' || $order->get_status() == 'completed'){
+									$this->write_log('Payment notification received - FAILURE for order #' . $order->get_id() . ' but order already ' . $order->get_status() . ' - ErrorID: ' . $_REQUEST['ErrorID'], 'warning');
 									print "PAYCOMET WC KO. Before: " . $order->get_status();
 									exit;		
 								}
 
-								$order->update_status( 'failed' );									
+								$order->update_status( 'failed' );
+								
+								// Log payment failure
+								$error_description = '';
+								if (function_exists('get_error_description')) {
+									$error_description = get_error_description($_REQUEST['ErrorID']);
+								}
+								$this->write_log('Payment notification received - FAILURE for order #' . $order->get_id() . ' - ErrorID: ' . $_REQUEST['ErrorID'] . ' - Error: ' . $error_description . ' - Order Reference: ' . (isset($_REQUEST['Order']) ? $_REQUEST['Order'] : 'N/A'), 'error');
+									
 								if ( class_exists( 'Automattic\WooCommerce\Utilities\OrderUtil' ) && OrderUtil::custom_orders_table_usage_is_enabled() ) {
 									$order->update_meta_data('ErrorID', $_REQUEST[ 'ErrorID' ] );
 									$order->save();
@@ -1631,14 +1668,14 @@
 							$error_txt = __( 'An error has occurred. Please verify the data entered and try again', 'wc_paytpv' );
 						}
 						print '<p>' . $error_txt .'</p>';
-						$this->write_log('Error ' . $apiResponse->errorCode . " en form");
+						$this->write_log('Error ' . $apiResponse->errorCode . " en form", 'error');
 					}
 				} catch (exception $e){
 					$url = "";
 				}
 
 			} else {
-				$this->write_log('Error 1004. ApiKey vacía');
+				$this->write_log('Error 1004. ApiKey vacía', 'error');
 				print '<p>' . __( 'Error: ', 'wc_paytpv' ) . "1004" .'</p>';
 				$url = "";
 			}
@@ -1652,11 +1689,17 @@
 
 			$result = "success";
 
+			$this->write_log( 'Processing payment for order #' . $order_id . ' - Amount: ' . $order->get_total() . ' ' . $order->get_currency() );
+
 			if ($this->isJetIframeActive) {
 				$result = $this->processJetIFramePayment($order);
 			}
 
-			$this->write_log( 'Process payment: ' . $order_id );
+			if ( $result === 'success' ) {
+				$this->write_log( 'Payment initiated successfully for order #' . $order_id );
+			} else {
+				$this->write_log( 'Payment initiation failed for order #' . $order_id, 'error' );
+			}
 
 			return array(
 				'result' => $result,
@@ -1819,8 +1862,10 @@
 
 				if ($executePurchaseResponse->errorCode>0) {
 					$order->update_status( 'failed' );
-					$this->write_log('Error ' . $executePurchaseResponse->errorCode . " en executePurchase");
+					$this->write_log('Error ' . $executePurchaseResponse->errorCode . " en executePurchase for order #" . $order->get_id(), 'error');
 					$urlReturn = $URLKO;
+				} else {
+					$this->write_log('Payment executed successfully for order #' . $order->get_id() . ' - AuthCode: ' . (isset($executePurchaseResponse->authCode) ? $executePurchaseResponse->authCode : 'N/A'));
 				}
 
 				$this->jetiframeOkUrl = $executePurchaseResponse->challengeUrl != '' ? $executePurchaseResponse->challengeUrl : $urlReturn;
@@ -2114,7 +2159,7 @@
 						$charge["DS_MERCHANT_AUTHCODE"] = $executePurchaseResponse->authCode;
 						$charge["DS_MERCHANT_AMOUNT"] = $executePurchaseResponse->amount;
 					} else {
-						$this->write_log('Error ' . $executePurchaseResponse->errorCode . " en executePurchase pago suscripcion");
+						$this->write_log('Error ' . $executePurchaseResponse->errorCode . " en executePurchase pago suscripcion for order #" . $order->get_id(), 'error');
 					}
 
 				} else {
@@ -2122,7 +2167,7 @@
 					$charge["DS_ERROR_ID"] = 1004;
 				}
 
-				$this->write_log('Error ' . json_encode($charge));
+				$this->write_log('Subscription payment charge result: ' . json_encode($charge));
 
 
 				if (( int ) $charge[ 'DS_RESPONSE' ] == 1 ) {
@@ -2175,7 +2220,7 @@
 			$order = wc_get_order( $order_id );
 
 			if (!$this->can_refund_order($order)) {
-				$this->write_log('Refund Failed: No transaction ID');
+				$this->write_log('Refund Failed: No transaction ID for order #' . $order_id, 'error');
 
 				return false;
 			}
@@ -2222,15 +2267,16 @@
 			} else {
 				$charge["DS_RESPONSE"] = 0;
 				$charge["DS_ERROR_ID"] = 1004;
-				$this->write_log('Error 1004. ApiKey vacía');
+				$this->write_log('Error 1004. ApiKey vacía for refund of order #' . $order_id, 'error');
 			}
 
 			if ((int) $result['DS_RESPONSE'] != 1) {
-				$this->write_log('Error ' . $executeRefundReponse->errorCode . ' en executeRefund');
+				$this->write_log('Error ' . $executeRefundReponse->errorCode . ' en executeRefund for order #' . $order_id . ' - Amount: ' . $amount, 'error');
 				$order->add_order_note('Refund Failed. Error: ' . $result['DS_ERROR_ID']);
 
 				return false;
 			} else {
+				$this->write_log('Refund successful for order #' . $order_id . ' - Amount: ' . $amount . ' - Refund ID: ' . $result['DS_MERCHANT_AUTHCODE']);
 				$order->add_order_note( sprintf( __('Refunded %s - Refund ID: %s', 'woocommerce'), $amount, $result['DS_MERCHANT_AUTHCODE']));
 
 				return true;
