@@ -1789,11 +1789,12 @@
 					$trxType = "R";
 				}
 
-				$dcc = $arrTerminalData["dcc"];
-				if ($dcc == 1) {
+			$dcc = $arrTerminalData["dcc"];
+			if ($dcc == 1) {
 
-					$OPERATION = 116;
-					try {
+				$OPERATION = 116;
+				$this->write_log('💳 ATTEMPTING DCC PAYMENT - Order #' . $order->get_id() . ' - Amount: ' . $importe . ' ' . $currency . ' - Terminal: ' . $term . ' - IdUser: ' . $idUser);
+				try {
 						$apiRest = new PaycometApiRest($this->apiKey);
 						$executePurchaseResponse = $apiRest->form(
                             $OPERATION,
@@ -1816,11 +1817,15 @@
                                 'urlKo' => $URLKO
                             ]
                         );
-					} catch (exception $e){
-						$error_txt = __( 'An error has occurred. Please verify the data entered and try again', 'wc_paytpv' );
-						wc_add_notice($error_txt, 'error' );
-					}
-				} else {
+				} catch (exception $e){
+					$this->write_log('⚠️ EXCEPTION CAUGHT IN DCC PAYMENT - Order #' . $order->get_id() . ' - Exception: ' . $e->getMessage() . ' - File: ' . basename($e->getFile()) . ' - Line: ' . $e->getLine(), 'error');
+					$error_txt = __( 'An error has occurred. Please verify the data entered and try again', 'wc_paytpv' );
+					wc_add_notice($error_txt, 'error' );
+					$this->jetiframeOkUrl = $URLKO;
+					return false;
+				}
+			} else {
+				$this->write_log('💳 ATTEMPTING EXECUTE PURCHASE - Order #' . $order->get_id() . ' - Amount: ' . $importe . ' ' . $currency . ' - Terminal: ' . $term . ' - IdUser: ' . $idUser);
 					try {
 						$apiRest = new PaycometApiRest($this->apiKey);
 						$executePurchaseResponse = $apiRest->executePurchase(
@@ -1845,13 +1850,16 @@
 							$merchantData,
 							$notifyDirectPayment
 						);
-					} catch (exception $e){
-						$error_txt = __( 'An error has occurred. Please verify the data entered and try again', 'wc_paytpv' );
-						wc_add_notice($error_txt, 'error' );
-					}
+				} catch (exception $e){
+					$this->write_log('⚠️ EXCEPTION CAUGHT IN EXECUTE PURCHASE - Order #' . $order->get_id() . ' - Exception: ' . $e->getMessage() . ' - File: ' . basename($e->getFile()) . ' - Line: ' . $e->getLine(), 'error');
+					$error_txt = __( 'An error has occurred. Please verify the data entered and try again', 'wc_paytpv' );
+					wc_add_notice($error_txt, 'error' );
+					$this->jetiframeOkUrl = $URLKO;
+					return false;
 				}
+			}
 
-				$urlReturn = $URLOK;
+			$urlReturn = $URLOK;
 
 				if ( class_exists( 'Automattic\WooCommerce\Utilities\OrderUtil' ) && OrderUtil::custom_orders_table_usage_is_enabled() ) {
 					$order->update_meta_data('ErrorID', $executePurchaseResponse->errorCode );
@@ -1860,20 +1868,32 @@
 					update_post_meta( ( int ) $order->get_id(), 'ErrorID', $executePurchaseResponse->errorCode);
 				}
 
-				if ($executePurchaseResponse->errorCode>0) {
-					$order->update_status( 'failed' );
-					$this->write_log('Error ' . $executePurchaseResponse->errorCode . " en executePurchase for order #" . $order->get_id(), 'error');
-					$urlReturn = $URLKO;
-				} else {
+			if ($executePurchaseResponse->errorCode>0) {
+				$order->update_status( 'failed' );
+				$logDetails = 'ErrorCode: ' . $executePurchaseResponse->errorCode;
+				if (isset($executePurchaseResponse->challengeUrl) && !empty($executePurchaseResponse->challengeUrl)) {
+					$logDetails .= ' - ChallengeUrl: Present';
+				}
+				if (isset($executePurchaseResponse->urlRedirection) && !empty($executePurchaseResponse->urlRedirection)) {
+					$logDetails .= ' - UrlRedirection: Present';
+				}
+				$this->write_log('❌ PAYMENT ERROR - Order #' . $order->get_id() . ' - ' . $logDetails, 'error');
+				$error_txt = __( 'An error has occurred. Please verify the data entered and try again', 'wc_paytpv' );
+				wc_add_notice($error_txt, 'error' );
+				$this->jetiframeOkUrl = $URLKO;
+				return false;
+			} else {
 					$this->write_log('Payment executed successfully for order #' . $order->get_id() . ' - AuthCode: ' . (isset($executePurchaseResponse->authCode) ? $executePurchaseResponse->authCode : 'N/A'));
 				}
 
-				$this->jetiframeOkUrl = $executePurchaseResponse->challengeUrl != '' ? $executePurchaseResponse->challengeUrl : $urlReturn;
+			$this->jetiframeOkUrl = $executePurchaseResponse->challengeUrl != '' ? $executePurchaseResponse->challengeUrl : $urlReturn;
 
-			} else {
-				$this->jetiframeOkUrl = $URLKO;
-			}
-			return "success";
+		} else {
+			$this->write_log('⚠️ MISSING API KEY - Order #' . $order->get_id() . ' - Cannot process payment without API key configured', 'error');
+			$this->jetiframeOkUrl = $URLKO;
+			return false;
+		}
+		return "success";
 		}
 
 
