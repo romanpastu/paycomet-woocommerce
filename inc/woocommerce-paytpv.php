@@ -205,18 +205,19 @@
 						]
 					);
 
-					if ($apiResponse->errorCode==0) {
-						$url_paytpv = $apiResponse->challengeUrl;
-					} else {
-						if ($apiResponse->errorCode==1004) {
-							$error_txt = __( 'Error: ', 'wc_paytpv' ) . $apiResponse->errorCode;
-						} else {
-							$error_txt = __( 'An error has occurred. Please verify the data entered and try again', 'wc_paytpv' );
-						}
-						print '<p>' . $error_txt .'</p>';
-						$gateway->write_log('Error ' . $apiResponse->errorCode . " en form", 'error');
-						exit;
-					}
+				if ($apiResponse->errorCode==0) {
+					$url_paytpv = $apiResponse->challengeUrl;
+			} else {
+				$error_description = get_error_description($apiResponse->errorCode);
+				if (is_user_friendly_error($apiResponse->errorCode)) {
+					$error_txt = $error_description . '. ' . __( 'Puedes probar PayPal como método alternativo', 'wc_paytpv' );
+				} else {
+					$error_txt = __( 'An error has occurred. Please verify the data entered and try again', 'wc_paytpv' ) . '. ' . __( 'Puedes probar PayPal como método alternativo', 'wc_paytpv' );
+				}
+				print '<p>' . $error_txt .'</p>';
+				$gateway->write_log('Error ' . $apiResponse->errorCode . " en form", 'error');
+				exit;
+			}
 				} catch (exception $e){
 					$url_paytpv = "";
 				}
@@ -788,10 +789,10 @@
 							$order->update_status( 'failed' );
 						}
 
-					} catch (exception $e){
-						$error_txt = __( 'An error has occurred. Please verify the data entered and try again', 'wc_paytpv' );
-						wc_add_notice($error_txt, 'error' );
-					}
+				} catch (exception $e){
+					$error_txt = __( 'An error has occurred. Please verify the data entered and try again', 'wc_paytpv' ) . '. ' . __( 'Puedes probar PayPal como método alternativo', 'wc_paytpv' );
+					wc_add_notice($error_txt, 'error' );
+				}
 
 				} else {
 					$salida = $URLKO;
@@ -1659,17 +1660,18 @@
 						[]
 					);
 
-					if ($apiResponse->errorCode==0) {
-						$url = $apiResponse->challengeUrl;
-					} else {
-						if ($apiResponse->errorCode==1004) {
-							$error_txt = __( 'Error: ', 'wc_paytpv' ) . $apiResponse->errorCode;
-						} else {
-							$error_txt = __( 'An error has occurred. Please verify the data entered and try again', 'wc_paytpv' );
-						}
-						print '<p>' . $error_txt .'</p>';
-						$this->write_log('Error ' . $apiResponse->errorCode . " en form", 'error');
-					}
+				if ($apiResponse->errorCode==0) {
+					$url = $apiResponse->challengeUrl;
+			} else {
+				$error_description = get_error_description($apiResponse->errorCode);
+				if (is_user_friendly_error($apiResponse->errorCode)) {
+					$error_txt = $error_description . '. ' . __( 'Puedes probar PayPal como método alternativo', 'wc_paytpv' );
+				} else {
+					$error_txt = __( 'An error has occurred. Please verify the data entered and try again', 'wc_paytpv' ) . '. ' . __( 'Puedes probar PayPal como método alternativo', 'wc_paytpv' );
+				}
+				print '<p>' . $error_txt .'</p>';
+				$this->write_log('Error ' . $apiResponse->errorCode . " en form", 'error');
+			}
 				} catch (exception $e){
 					$url = "";
 				}
@@ -1741,15 +1743,16 @@
 						$notify
 					);
 
-					if (isset($addUserResponse->errorCode) && $addUserResponse->errorCode>0) {
-                        if ($addUserResponse->errorCode==1004) {
-                            $error_txt = __( 'Error: ', 'wc_paytpv' ) . $addUserResponse->errorCode;
-                        } else {
-                            $error_txt = $addUserResponse->errorCode . ":" . __( 'An error has occurred. Please verify the data entered and try again', 'wc_paytpv' );
-                        }                       
-                        wc_add_notice($error_txt, 'error' );
-                        return false;
-                    }
+			if (isset($addUserResponse->errorCode) && $addUserResponse->errorCode>0) {
+                $error_description = get_error_description($addUserResponse->errorCode);
+                if (is_user_friendly_error($addUserResponse->errorCode)) {
+                    $error_txt = $error_description . '. ' . __( 'Puedes probar PayPal como método alternativo', 'wc_paytpv' );
+                } else {
+                    $error_txt = __( 'An error has occurred. Please verify the data entered and try again', 'wc_paytpv' ) . '. ' . __( 'Puedes probar PayPal como método alternativo', 'wc_paytpv' );
+                }                       
+                wc_add_notice($error_txt, 'error' );
+                return false;
+            }
 					$idUser = $addUserResponse->idUser;
 					$tokenUser = $addUserResponse->tokenUser;
 				}
@@ -1817,13 +1820,13 @@
                                 'urlKo' => $URLKO
                             ]
                         );
-				} catch (exception $e){
-					$this->write_log('⚠️ EXCEPTION CAUGHT IN DCC PAYMENT - Order #' . $order->get_id() . ' - Exception: ' . $e->getMessage() . ' - File: ' . basename($e->getFile()) . ' - Line: ' . $e->getLine(), 'error');
-					$error_txt = __( 'An error has occurred. Please verify the data entered and try again', 'wc_paytpv' );
-					wc_add_notice($error_txt, 'error' );
-					$this->jetiframeOkUrl = $URLKO;
-					return false;
-				}
+			} catch (exception $e){
+				$this->write_log('⚠️ EXCEPTION CAUGHT IN DCC PAYMENT - Order #' . $order->get_id() . ' - Exception: ' . $e->getMessage() . ' - File: ' . basename($e->getFile()) . ' - Line: ' . $e->getLine(), 'error');
+				$error_txt = __( 'An error has occurred. Please verify the data entered and try again', 'wc_paytpv' ) . '. ' . __( 'Puedes probar PayPal como método alternativo', 'wc_paytpv' );
+				wc_add_notice($error_txt, 'error' );
+				$this->jetiframeOkUrl = $URLKO;
+				return false;
+			}
 			} else {
 				$this->write_log('💳 ATTEMPTING EXECUTE PURCHASE - Order #' . $order->get_id() . ' - Amount: ' . $importe . ' ' . $currency . ' - Terminal: ' . $term . ' - IdUser: ' . $idUser);
 					try {
@@ -1850,13 +1853,13 @@
 							$merchantData,
 							$notifyDirectPayment
 						);
-				} catch (exception $e){
-					$this->write_log('⚠️ EXCEPTION CAUGHT IN EXECUTE PURCHASE - Order #' . $order->get_id() . ' - Exception: ' . $e->getMessage() . ' - File: ' . basename($e->getFile()) . ' - Line: ' . $e->getLine(), 'error');
-					$error_txt = __( 'An error has occurred. Please verify the data entered and try again', 'wc_paytpv' );
-					wc_add_notice($error_txt, 'error' );
-					$this->jetiframeOkUrl = $URLKO;
-					return false;
-				}
+			} catch (exception $e){
+				$this->write_log('⚠️ EXCEPTION CAUGHT IN EXECUTE PURCHASE - Order #' . $order->get_id() . ' - Exception: ' . $e->getMessage() . ' - File: ' . basename($e->getFile()) . ' - Line: ' . $e->getLine(), 'error');
+				$error_txt = __( 'An error has occurred. Please verify the data entered and try again', 'wc_paytpv' ) . '. ' . __( 'Puedes probar PayPal como método alternativo', 'wc_paytpv' );
+				wc_add_notice($error_txt, 'error' );
+				$this->jetiframeOkUrl = $URLKO;
+				return false;
+			}
 			}
 
 			$urlReturn = $URLOK;
@@ -1868,21 +1871,26 @@
 					update_post_meta( ( int ) $order->get_id(), 'ErrorID', $executePurchaseResponse->errorCode);
 				}
 
-			if ($executePurchaseResponse->errorCode>0) {
-				$order->update_status( 'failed' );
-				$logDetails = 'ErrorCode: ' . $executePurchaseResponse->errorCode;
-				if (isset($executePurchaseResponse->challengeUrl) && !empty($executePurchaseResponse->challengeUrl)) {
-					$logDetails .= ' - ChallengeUrl: Present';
-				}
-				if (isset($executePurchaseResponse->urlRedirection) && !empty($executePurchaseResponse->urlRedirection)) {
-					$logDetails .= ' - UrlRedirection: Present';
-				}
-				$this->write_log('❌ PAYMENT ERROR - Order #' . $order->get_id() . ' - ' . $logDetails, 'error');
-				$error_txt = __( 'An error has occurred. Please verify the data entered and try again', 'wc_paytpv' );
-				wc_add_notice($error_txt, 'error' );
-				$this->jetiframeOkUrl = $URLKO;
-				return false;
+		if ($executePurchaseResponse->errorCode>0) {
+			$order->update_status( 'failed' );
+			$logDetails = 'ErrorCode: ' . $executePurchaseResponse->errorCode;
+			if (isset($executePurchaseResponse->challengeUrl) && !empty($executePurchaseResponse->challengeUrl)) {
+				$logDetails .= ' - ChallengeUrl: Present';
+			}
+			if (isset($executePurchaseResponse->urlRedirection) && !empty($executePurchaseResponse->urlRedirection)) {
+				$logDetails .= ' - UrlRedirection: Present';
+			}
+			$this->write_log('❌ PAYMENT ERROR - Order #' . $order->get_id() . ' - ' . $logDetails, 'error');
+			$error_description = get_error_description($executePurchaseResponse->errorCode);
+			if (is_user_friendly_error($executePurchaseResponse->errorCode)) {
+				$error_txt = $error_description . '. ' . __( 'Puedes probar PayPal como método alternativo', 'wc_paytpv' );
 			} else {
+				$error_txt = __( 'An error has occurred. Please verify the data entered and try again', 'wc_paytpv' ) . '. ' . __( 'Puedes probar PayPal como método alternativo', 'wc_paytpv' );
+			}
+			wc_add_notice($error_txt, 'error' );
+			$this->jetiframeOkUrl = $URLKO;
+			return false;
+		} else {
 					$this->write_log('Payment executed successfully for order #' . $order->get_id() . ' - AuthCode: ' . (isset($executePurchaseResponse->authCode) ? $executePurchaseResponse->authCode : 'N/A'));
 				}
 

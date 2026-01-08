@@ -187,6 +187,106 @@ function my_update_notice() {
 	<?php 
 }
 
+/**
+ * Determines if an error code should display specific details to the user
+ * Returns true for user-actionable errors (card issues, authentication, etc.)
+ * Returns false for technical/system errors that should show generic message
+ *
+ * @param int $error_code Error code from PayComet
+ * @return bool True if error should show specific message to user
+ */
+function is_user_friendly_error($error_code) {
+	if (!$error_code || !is_numeric($error_code)) {
+		return false;
+	}
+	
+	$error_code = intval($error_code);
+	
+	// User-friendly errors that customers can understand and potentially fix
+	$user_friendly_errors = array(
+		// Card-related errors (100-199)
+		100, // Expired credit card
+		101, // Credit card blacklisted
+		102, // Operation not allowed for the credit card type
+		103, // Please, call the credit card issuer
+		105, // Insufficient funds
+		106, // Credit card not registered or not logged by the issuer
+		107, // Data error. Validation Code
+		108, // PAN Check Error
+		109, // Expiry date error
+		110, // Data error
+		111, // CVC2 block incorrect
+		112, // Please, call the credit card issuer
+		113, // Credit card not valid
+		114, // The credit card has credit restrictions
+		115, // Card issuer could not validate card owner
+		118, // Expired credit card. Please capture card
+		119, // Credit card blacklisted. Please capture card
+		120, // Credit card lost or stolen. Please capture card
+		121, // Error in CVC2. Please capture card
+		135, // CVC2 block incorrect
+		137, // Credit card not valid
+		140, // Credit card does not exist
+		141, // Amount zero or not valid
+		142, // Operation canceled
+		143, // Authentification error
+		144, // Denegation by security level
+		147, // Duplicated transaction
+		151, // Invalid card expiration date
+		154, // Cannot operate with given credit card
+		172, // Operation denied. No repeat
+		173, // Denied operation for card data sent
+		174, // Operation denied. Do not repeat before 72 hours
+		184, // The authentication process was canceled
+		195, // Requires SCA authentication
+		
+		// Gateway/transaction errors that users can understand (500-599)
+		504, // Transaction already cancelled
+		505, // Transaction originally denied
+		508, // Transaction still in process
+		510, // Refund is not possible
+		512, // Card issuer not available right now. Please try again later
+		538, // Not cancelable operation
+		562, // Credit card does not allow preauthorizations
+		569, // Denied operation
+		
+		// User configuration errors (1000-1099)
+		1004, // Forbidden access
+		1005, // Invalid credit card format
+		1006, // Data error: Validation code
+		1007, // Data error: Expiration date
+		1100, // Card diary limit exceeds
+		
+		// Bizum specific errors (1340-1346, 1400)
+		1340, // Payment method not available
+		1341, // Bizum. Authentication failed. Lock after three attempts.
+		1342, // Bizum. Transaction cancelled. The user does not wish to continue.
+		1343, // Bizum. Payment rejected by beneficiary.
+		1344, // Bizum. Charge rejected by originator.
+		1345, // Bizum. The processor rejects the operation.
+		1346, // Bizum. Insufficient available balance.
+		1400, // Bizum could not authenticate user
+		
+		// PayPal specific errors (1417-1425)
+		1417, // PayPal - The instrument presented has been declined. Please select another one.
+		1425, // PayPal - Operation cancelled by user.
+		
+		// Card/operation specific errors (1450+)
+		1450, // Refund card does not match the authorization one
+		1475, // Number of PIN attempts exceeded
+		1476, // Mandatory PIN
+		1477, // Wrong PIN
+		1484, // Repeat operation with CHIP reading
+		1485, // Repeat operation with CHIP reading
+		1486, // Call the issuer
+		1489, // Card on Black List or suspected of fraud
+		1490, // Blacklisted or suspected fraud card
+		1495, // Cancellation not allowed. Authorization already refunded
+	);
+	
+	return in_array($error_code, $user_friendly_errors);
+}
+
 function custom_display_checkout_error_message() {
     if ( isset( $_GET['order'] )) {
         $order_id=$_GET['order'];
@@ -194,19 +294,24 @@ function custom_display_checkout_error_message() {
     }
 
     if ( isset( $_GET['paycomet_error'] ) && $_GET['paycomet_error'] === 'payment' ) {
-        if ($order->get_meta("ErrorID") == 1004) {
-            $error_txt = __( 'Error: ', 'wc_paytpv' ) . $order->get_meta("ErrorID");
-        }else{
-            $error_txt = __( 'An error has occurred. Please verify the data entered and try again', 'wc_paytpv' );
-        }
-        wc_print_notice( $error_txt, 'error' );
-
 		$error_code = $order->get_meta("ErrorID");
         $error_description = get_error_description($error_code);
+		
+		// Determine if this error should show specific details to the user
+		if (is_user_friendly_error($error_code)) {
+			// Show specific error message to user
+			$error_txt = $error_description . '. ' . __( 'Puedes probar PayPal como método alternativo', 'wc_paytpv' );
+		} else {
+			// Show generic error for system/technical issues
+			$error_txt = __( 'An error has occurred. Please verify the data entered and try again', 'wc_paytpv' ) . '. ' . __( 'Puedes probar PayPal como método alternativo', 'wc_paytpv' );
+		}
+		
+        wc_print_notice( $error_txt, 'error' );
+
 		/**
 		 * Formateamos un mensaje de error descriptivo para guardar en logs
 		 */
-        $error_txt = sprintf(
+        $log_error_txt = sprintf(
             __('Payment error: %s (%d)', 'wc_paytpv'),
             $error_description,
             $error_code
@@ -218,10 +323,10 @@ function custom_display_checkout_error_message() {
 			if ( isset( $settings['enable_logging'] ) && $settings['enable_logging'] === 'yes' ) {
 				$logger = wc_get_logger();
 				$log_source = 'paycomet-' . date( 'Y-m-d' );
-				$logger->log( 'error', 'Checkout error for order #' . $order_id . ': ' . $error_txt, array( 'source' => $log_source ) );
+				$logger->log( 'error', 'Checkout error for order #' . $order_id . ': ' . $log_error_txt, array( 'source' => $log_source ) );
 			}
 		} elseif ( true === WP_DEBUG ) {
-			error_log($error_txt);
+			error_log($log_error_txt);
 		}
 		
     }
