@@ -2,7 +2,10 @@
     $saved_cards = Paytpv::savedActiveCards(get_current_user_id());
     $store_card = (sizeof($saved_cards) == 0) ? "none" : "";
 
-    $paytpvBase = new woocommerce_paytpv(false); 
+    $paytpvBase = new woocommerce_paytpv(false);
+    
+    // Mensaje de PayPal alternativo para JavaScript
+    $paypal_alt_msg = PAYTPV_PAYPAL_ALTERNATIVE_MSG;
 ?>
 <form role="form" name="aux"></form>
 <form role="form" name="paycometPaymentForm" id="paycometPaymentForm" action="javascript:jetIframeValidated()" method="POST">
@@ -106,17 +109,23 @@
     <input type="submit" style="width: 290px; display:none;" name="jetiframe-button" id="jetiframe-button" value="<?php print __('Make payment', 'wc_paytpv');?>">
 </form>
 
-<div id="paymentErrorMsg" style="color: #fff; background: #b22222; margin-top: 10px; text-align: center;">
+<div id="paymentErrorMsg" style="display:none; color: #fff; background: #b22222; margin-top: 10px; padding: 10px; text-align: center; border-radius: 3px;">
 
 </div>
 
 <script type="text/javascript">
+// PAYCOMET script loading state management
+var paycometScriptLoaded = false;
+var paycometScriptError = false;
+var paycometScriptRetries = 0;
+var paycometScriptMaxRetries = 3;
 
-//Oculta o muestra el formulario si hay una tarjeta guardada seleccionada
+// Toggle payment form visibility based on saved card selection
 function checkSelectedCard() {
     if (document.getElementById('jet_iframe_card').value != 0){
         document.getElementById('toHide').style.display = "none";
         document.getElementById('storingStep').style.display = "none";
+        jQuery('#paymentErrorMsg').hide();
     } else {
         if (document.getElementById('toHide')) {
             document.getElementById('toHide').style.display = "block";
@@ -124,39 +133,108 @@ function checkSelectedCard() {
         if (document.getElementById('storingStep')) {
             document.getElementById('storingStep').style.display = "block";
         }
+        checkPaycometScript();
     }
 
     document.getElementById('hiddenCardField').value = document.getElementById('jet_iframe_card').value;
 };
 
+function showPaymentError(message) {
+    var errorDiv = document.getElementById('paymentErrorMsg');
+    errorDiv.innerHTML = message;
+    errorDiv.style.display = 'block';
+    jQuery('#place_order').prop("disabled", false);
+}
 
+// Verify PAYCOMET script is loaded before payment attempt
+function checkPaycometScript() {
+    if (document.getElementById('jet_iframe_card') && document.getElementById('jet_iframe_card').value == 0) {
+        if (paycometScriptError) {
+            showPaymentError('<?php echo esc_js(__("Error loading payment system", "wc_paytpv") . ". " . $paypal_alt_msg . " " . __("or disable your ad blocker and refresh the page", "wc_paytpv")); ?>');
+            return false;
+        } else if (!paycometScriptLoaded && typeof window.PaycometClient === 'undefined') {
+            showPaymentError('<?php echo esc_js(__("Payment system is loading... Please wait a moment and try again", "wc_paytpv") . ". " . __("If the error persists", "wc_paytpv") . ", " . strtolower($paypal_alt_msg)); ?>');
+            return false;
+        }
+    }
+    return true;
+}
 
-//Comportamiento cuando se valida el formulario de JetIframe correctamente
+// Handle JetIframe validation and form submission
 function jetIframeValidated(){
+    jQuery('#paymentErrorMsg').hide();
+    
     if (document.getElementById("jetiframe_savecard") != null) {
         document.getElementById("savecard_jetiframe").checked = document.getElementById("jetiframe_savecard").checked;
     }
 
-    document.getElementById("jetiframe-token").value = document.getElementsByName("paytpvToken")[0].value;
-    if (jQuery("#jetiframe-token").val() != "") {
-        jQuery('#place_order').parents('form:first').submit();
+    // Validate token exists and has value
+    var paytpvTokenElement = document.getElementsByName("paytpvToken")[0];
+    if (!paytpvTokenElement || !paytpvTokenElement.value) {
+        showPaymentError('<?php echo esc_js(__("Payment validation error. Please check your card details and try again", "wc_paytpv") . ", " . strtolower($paypal_alt_msg)); ?>');
+        return false;
     }
 
+    document.getElementById("jetiframe-token").value = paytpvTokenElement.value;
+    if (jQuery("#jetiframe-token").val() != "") {
+        jQuery('#place_order').parents('form:first').submit();
+    } else {
+        showPaymentError('<?php echo esc_js(__("Error processing payment", "wc_paytpv") . ". " . $paypal_alt_msg); ?>');
+        return false;
+    }
 }
 
 function enablePlaceOrder() {
     jQuery('#place_order').prop("disabled",false);
 }
 
-// formSubmit
+// Load PAYCOMET script with automatic retry mechanism
+function loadPaycometScript() {
+    var scriptUrl = 'https://api.paycomet.com/gateway/paycomet.jetiframe.js?lang=<?=strtolower($paytpvBase->_getLanguange("EN"));?>';
+    
+    jQuery.getScript(scriptUrl)
+        .done(function() {
+            paycometScriptLoaded = true;
+            paycometScriptRetries = 0;
+            if (typeof console !== 'undefined' && console.log) {
+                console.log('PAYCOMET: Script loaded successfully');
+            }
+            jQuery('#paymentErrorMsg').hide();
+        })
+        .fail(function() {
+            paycometScriptRetries++;
+            if (typeof console !== 'undefined' && console.error) {
+                console.error('PAYCOMET: Script load failed (attempt ' + paycometScriptRetries + '/' + paycometScriptMaxRetries + ')');
+            }
+            
+            if (paycometScriptRetries < paycometScriptMaxRetries) {
+                var retryDelay = paycometScriptRetries * 1000;
+                if (typeof console !== 'undefined' && console.log) {
+                    console.log('PAYCOMET: Retrying in ' + (retryDelay/1000) + 's...');
+                }
+                setTimeout(function() {
+                    loadPaycometScript();
+                }, retryDelay);
+            } else {
+                paycometScriptError = true;
+                if (typeof console !== 'undefined' && console.error) {
+                    console.error('PAYCOMET: Script failed after ' + paycometScriptMaxRetries + ' attempts');
+                }
+                if (document.getElementById('jet_iframe_card') && document.getElementById('jet_iframe_card').value == 0) {
+                    showPaymentError('<?php echo esc_js(__("Error loading payment system", "wc_paytpv") . ". " . $paypal_alt_msg . " " . __("or disable your ad blocker and refresh the page", "wc_paytpv")); ?>');
+                }
+            }
+        });
+}
+
+// Initialize payment form and event handlers
 jQuery( function( $ ) {
     if (typeof $.fn.select2 !== 'undefined') {
         $('#jet_iframe_card, #paycomet_card_month, #paycomet_card_year').select2();
     }
     
-    // Si esta cargado el formulario jetIframe cargamos el js
     if ($("#paycometPaymentForm").val() == "") {
-        $.getScript('https://api.paycomet.com/gateway/paycomet.jetiframe.js?lang=<?=strtolower($paytpvBase->_getLanguange("EN"));?>');
+        loadPaycometScript();
     }
 
     $( "#place_order").on('click',function( event ) {
@@ -165,10 +243,12 @@ jQuery( function( $ ) {
 
             new_card = (document.getElementById('jet_iframe_card').value == 0)?true:false;
 
-            // New Card
             if (new_card) {
+                if (!checkPaycometScript()) {
+                    return false;
+                }
+                
                 jQuery('#place_order').prop("disabled",true);
-                // jetIframe action
                 $("#jetiframe-button").click();
             } else {
                 $('#place_order').parents('form:first').submit();
@@ -178,7 +258,10 @@ jQuery( function( $ ) {
         }
     });
 
-    setTimeout(() => {  checkSelectedCard() }, 100);
+    setTimeout(() => {  
+        checkSelectedCard();
+        checkPaycometScript();
+    }, 100);
 });
 
 </script>

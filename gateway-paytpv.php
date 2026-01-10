@@ -21,6 +21,9 @@ define( 'PAYTPV_PLUGIN_DIR', plugin_dir_path( __FILE__ ) );
 define( 'PAYTPV_PLUGIN', __FILE__ );
 define( 'PAYTPV_PLUGIN_BASENAME', plugin_basename( PAYTPV_PLUGIN ) );
 
+// PayPal alternative message - used in payment errors
+define( 'PAYTPV_PAYPAL_ALTERNATIVE_MSG', 'Puedes probar PayPal como método de pago alternativo' );
+
 
 require_once PAYTPV_PLUGIN_DIR . 'paytpv.php';
 require_once PAYTPV_PLUGIN_DIR . 'inc/dependencies.php';
@@ -288,49 +291,70 @@ function is_user_friendly_error($error_code) {
 }
 
 function custom_display_checkout_error_message() {
-    if ( isset( $_GET['order'] )) {
-        $order_id=$_GET['order'];
+    // Check if we have a payment error parameter
+    if ( ! isset( $_GET['paycomet_error'] ) || $_GET['paycomet_error'] !== 'payment' ) {
+        return;
+    }
+    
+    // Get order if order ID is provided
+    $order = null;
+    $order_id = null;
+    if ( isset( $_GET['order'] ) ) {
+        $order_id = intval( $_GET['order'] );
         $order = wc_get_order( $order_id );
     }
-
-    if ( isset( $_GET['paycomet_error'] ) && $_GET['paycomet_error'] === 'payment' ) {
-		$error_code = $order->get_meta("ErrorID");
-        $error_description = get_error_description($error_code);
-		
-		// Determine if this error should show specific details to the user
-		if (is_user_friendly_error($error_code)) {
-			// Show specific error message to user
-			$error_txt = $error_description . '. ' . __( 'Puedes probar PayPal como método alternativo', 'wc_paytpv' );
-		} else {
-			// Show generic error for system/technical issues
-			$error_txt = __( 'An error has occurred. Please verify the data entered and try again', 'wc_paytpv' ) . '. ' . __( 'Puedes probar PayPal como método alternativo', 'wc_paytpv' );
-		}
-		
+    
+    // If no valid order, show generic error with PayPal alternative
+    if ( ! $order ) {
+        $error_txt = __( 'An error has occurred processing your payment', 'wc_paytpv' ) . '. ' . PAYTPV_PAYPAL_ALTERNATIVE_MSG;
         wc_print_notice( $error_txt, 'error' );
-
-		/**
-		 * Formateamos un mensaje de error descriptivo para guardar en logs
-		 */
-        $log_error_txt = sprintf(
-            __('Payment error: %s (%d)', 'wc_paytpv'),
-            $error_description,
-            $error_code
-        );
-		
-		// Use WooCommerce logger if available
-		if ( function_exists( 'wc_get_logger' ) ) {
-			$settings = get_option('woocommerce_paytpv_settings', array());
-			if ( isset( $settings['enable_logging'] ) && $settings['enable_logging'] === 'yes' ) {
-				$logger = wc_get_logger();
-				$log_source = 'paycomet-' . date( 'Y-m-d' );
-				$logger->log( 'error', 'Checkout error for order #' . $order_id . ': ' . $log_error_txt, array( 'source' => $log_source ) );
-			}
-		} elseif ( true === WP_DEBUG ) {
-			error_log($log_error_txt);
-		}
-		
+        return;
     }
-	
+    
+    // Get error code from order metadata
+    $error_code = $order->get_meta("ErrorID");
+    
+    // If no error code, use generic error
+    if ( empty( $error_code ) || ! is_numeric( $error_code ) ) {
+        $error_txt = __( 'An error has occurred processing your payment', 'wc_paytpv' ) . '. ' . PAYTPV_PAYPAL_ALTERNATIVE_MSG;
+        wc_print_notice( $error_txt, 'error' );
+        return;
+    }
+    
+    // Get error description
+    $error_description = get_error_description($error_code);
+    
+    // Determine if this error should show specific details to the user
+    if (is_user_friendly_error($error_code)) {
+        // Show specific error message to user
+        $error_txt = $error_description . '. ' . PAYTPV_PAYPAL_ALTERNATIVE_MSG;
+    } else {
+        // Show generic error for system/technical issues
+        $error_txt = __( 'An error has occurred. Please verify the data entered and try again', 'wc_paytpv' ) . '. ' . PAYTPV_PAYPAL_ALTERNATIVE_MSG;
+    }
+    
+    wc_print_notice( $error_txt, 'error' );
+
+    /**
+     * Log error for debugging
+     */
+    $log_error_txt = sprintf(
+        __('Payment error: %s (%d)', 'wc_paytpv'),
+        $error_description,
+        $error_code
+    );
+    
+    // Use WooCommerce logger if available
+    if ( function_exists( 'wc_get_logger' ) ) {
+        $settings = get_option('woocommerce_paytpv_settings', array());
+        if ( isset( $settings['enable_logging'] ) && $settings['enable_logging'] === 'yes' ) {
+            $logger = wc_get_logger();
+            $log_source = 'paycomet-' . date( 'Y-m-d' );
+            $logger->log( 'error', 'Checkout error for order #' . $order_id . ': ' . $log_error_txt, array( 'source' => $log_source ) );
+        }
+    } elseif ( true === WP_DEBUG ) {
+        error_log($log_error_txt);
+    }
 }
 
 /**

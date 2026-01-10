@@ -210,9 +210,9 @@
 			} else {
 				$error_description = get_error_description($apiResponse->errorCode);
 				if (is_user_friendly_error($apiResponse->errorCode)) {
-					$error_txt = $error_description . '. ' . __( 'Puedes probar PayPal como método alternativo', 'wc_paytpv' );
+					$error_txt = $error_description . '. ' . __( 'Try PayPal as an alternative payment method', 'wc_paytpv' );
 				} else {
-					$error_txt = __( 'An error has occurred. Please verify the data entered and try again', 'wc_paytpv' ) . '. ' . __( 'Puedes probar PayPal como método alternativo', 'wc_paytpv' );
+					$error_txt = __( 'An error has occurred. Please verify the data entered and try again', 'wc_paytpv' ) . '. ' . __( 'Try PayPal as an alternative payment method', 'wc_paytpv' );
 				}
 				print '<p>' . $error_txt .'</p>';
 				$gateway->write_log('Error ' . $apiResponse->errorCode . " en form", 'error');
@@ -777,20 +777,22 @@
                             ]
                         );
 
-						if ($apiResponse->errorCode==0) {
-							$salida = $apiResponse->challengeUrl;
+					if ($apiResponse->errorCode==0) {
+						$salida = $apiResponse->challengeUrl;
+					} else {
+						if ( class_exists( 'Automattic\WooCommerce\Utilities\OrderUtil' ) && OrderUtil::custom_orders_table_usage_is_enabled() ) {
+							$order->update_meta_data('ErrorID', $apiResponse->errorCode );
+							$order->save();
 						} else {
-							if ( class_exists( 'Automattic\WooCommerce\Utilities\OrderUtil' ) && OrderUtil::custom_orders_table_usage_is_enabled() ) {
-								$order->update_meta_data('ErrorID', $apiResponse->errorCode );
-								$order->save();
-							} else {
-								update_post_meta( ( int ) $order->get_id(), 'ErrorID', $apiResponse->errorCode);
-							}
-							$order->update_status( 'failed' );
+							update_post_meta( ( int ) $order->get_id(), 'ErrorID', $apiResponse->errorCode);
 						}
+						$order->update_status( 'failed' );
+						$this->write_log('❌ SAVED CARD PAYMENT ERROR - Order #' . $order->get_id() . ' - ErrorCode: ' . $apiResponse->errorCode, 'error');
+					}
 
 				} catch (exception $e){
-					$error_txt = __( 'An error has occurred. Please verify the data entered and try again', 'wc_paytpv' ) . '. ' . __( 'Puedes probar PayPal como método alternativo', 'wc_paytpv' );
+					$this->write_log('⚠️ EXCEPTION IN SAVED CARD PAYMENT - Order #' . $order->get_id() . ' - Exception: ' . $e->getMessage(), 'error');
+					$error_txt = __( 'An error has occurred. Please verify the data entered and try again', 'wc_paytpv' ) . '. ' . PAYTPV_PAYPAL_ALTERNATIVE_MSG;
 					wc_add_notice($error_txt, 'error' );
 				}
 
@@ -971,9 +973,10 @@
 										$subscription  = array_pop( $subscriptions );
 										if ($subscription && $subscription->get_parent_id()) {
 											if ( class_exists( 'Automattic\WooCommerce\Utilities\OrderUtil' ) && OrderUtil::custom_orders_table_usage_is_enabled() ) {
-												$order->update_meta_data('PayTPV_IdUser', $saved_card["paytpv_iduser"] );
-												$order->update_meta_data('PayTPV_TokenUser', $saved_card["paytpv_tokenuser"] );
-												$order->save();
+												$parent_order = wc_get_order($subscription->get_parent_id());
+												$parent_order->update_meta_data('PayTPV_IdUser', $idUser );
+												$parent_order->update_meta_data('PayTPV_TokenUser', $tokenUser );
+												$parent_order->save();
 											} else {
 												update_post_meta((int) $subscription->get_parent_id(), 'PayTPV_IdUser', $idUser);
 												update_post_meta((int) $subscription->get_parent_id(), 'PayTPV_TokenUser', $tokenUser);
@@ -1665,9 +1668,9 @@
 			} else {
 				$error_description = get_error_description($apiResponse->errorCode);
 				if (is_user_friendly_error($apiResponse->errorCode)) {
-					$error_txt = $error_description . '. ' . __( 'Puedes probar PayPal como método alternativo', 'wc_paytpv' );
+					$error_txt = $error_description . '. ' . PAYTPV_PAYPAL_ALTERNATIVE_MSG;
 				} else {
-					$error_txt = __( 'An error has occurred. Please verify the data entered and try again', 'wc_paytpv' ) . '. ' . __( 'Puedes probar PayPal como método alternativo', 'wc_paytpv' );
+					$error_txt = __( 'An error has occurred. Please verify the data entered and try again', 'wc_paytpv' ) . '. ' . PAYTPV_PAYPAL_ALTERNATIVE_MSG;
 				}
 				print '<p>' . $error_txt .'</p>';
 				$this->write_log('Error ' . $apiResponse->errorCode . " en form", 'error');
@@ -1709,25 +1712,58 @@
 			);
 		}
 
-		function processJetIframePayment($order)
-		{
-			$ip = $this->getIp();
-			$arrTerminalData = $this->TerminalCurrency($order);
-			$URLOK = $this->get_return_url($order);
-			$paramsUrl = array(
-				'order' => $order->get_id(),
-				'paycomet_error' => 'payment'
-			);
-			$URLKO = add_query_arg( $paramsUrl, wc_get_checkout_url() );
+	function processJetIframePayment($order)
+	{
+		$ip = $this->getIp();
+		$arrTerminalData = $this->TerminalCurrency($order);
+		$URLOK = $this->get_return_url($order);
+		$paramsUrl = array(
+			'order' => $order->get_id(),
+			'paycomet_error' => 'payment'
+		);
+		$URLKO = add_query_arg( $paramsUrl, wc_get_checkout_url() );
 
-			// With token Card
-			if ($_POST['hiddenCardField'] != 0) {
-				$saved_card = PayTPV::savedCard($order->get_user_id(), $_POST['hiddenCardField']);
-				$idUser = $saved_card["paytpv_iduser"];
-				$tokenUser = $saved_card["paytpv_tokenuser"];
+		// With token Card
+		if (isset($_POST['hiddenCardField']) && $_POST['hiddenCardField'] != 0) {
+			$saved_card = PayTPV::savedCard($order->get_user_id(), $_POST['hiddenCardField']);
+			if (empty($saved_card)) {
+				// Save error code
+				$error_code = 1099;
+				if ( class_exists( 'Automattic\WooCommerce\Utilities\OrderUtil' ) && OrderUtil::custom_orders_table_usage_is_enabled() ) {
+					$order->update_meta_data('ErrorID', $error_code );
+					$order->save();
+				} else {
+					update_post_meta( ( int ) $order->get_id(), 'ErrorID', $error_code);
+				}
+				$order->update_status( 'failed' );
+				$this->write_log('❌ SAVED CARD NOT FOUND - Order #' . $order->get_id(), 'error');
+				$error_txt = __( 'An error has occurred. Please verify the data entered and try again', 'wc_paytpv' ) . '. ' . PAYTPV_PAYPAL_ALTERNATIVE_MSG;
+				wc_add_notice($error_txt, 'error' );
+				$this->jetiframeOkUrl = $URLKO;
+				return false;
+			}
+			$idUser = $saved_card["paytpv_iduser"];
+			$tokenUser = $saved_card["paytpv_tokenuser"];
 
-			// With jetIframe Token
-			} else {
+		// With jetIframe Token
+		} else {
+			// Validate token exists
+			if (empty($_POST['jetiframe-token'])) {
+				// Save error code
+				$error_code = 1099;
+				if ( class_exists( 'Automattic\WooCommerce\Utilities\OrderUtil' ) && OrderUtil::custom_orders_table_usage_is_enabled() ) {
+					$order->update_meta_data('ErrorID', $error_code );
+					$order->save();
+				} else {
+					update_post_meta( ( int ) $order->get_id(), 'ErrorID', $error_code);
+				}
+				$order->update_status( 'failed' );
+				$this->write_log('❌ JETIFRAME TOKEN MISSING - Order #' . $order->get_id(), 'error');
+				$error_txt = __( 'An error has occurred. Please verify the data entered and try again', 'wc_paytpv' ) . '. ' . PAYTPV_PAYPAL_ALTERNATIVE_MSG;
+				wc_add_notice($error_txt, 'error' );
+				$this->jetiframeOkUrl = $URLKO;
+				return false;
+			}
 				// REST
 				if ($this->apiKey != '') {
 
@@ -1746,9 +1782,9 @@
 			if (isset($addUserResponse->errorCode) && $addUserResponse->errorCode>0) {
                 $error_description = get_error_description($addUserResponse->errorCode);
                 if (is_user_friendly_error($addUserResponse->errorCode)) {
-                    $error_txt = $error_description . '. ' . __( 'Puedes probar PayPal como método alternativo', 'wc_paytpv' );
+                    $error_txt = $error_description . '. ' . PAYTPV_PAYPAL_ALTERNATIVE_MSG;
                 } else {
-                    $error_txt = __( 'An error has occurred. Please verify the data entered and try again', 'wc_paytpv' ) . '. ' . __( 'Puedes probar PayPal como método alternativo', 'wc_paytpv' );
+                    $error_txt = __( 'An error has occurred. Please verify the data entered and try again', 'wc_paytpv' ) . '. ' . PAYTPV_PAYPAL_ALTERNATIVE_MSG;
                 }                       
                 wc_add_notice($error_txt, 'error' );
                 return false;
@@ -1822,7 +1858,7 @@
                         );
 			} catch (exception $e){
 				$this->write_log('⚠️ EXCEPTION CAUGHT IN DCC PAYMENT - Order #' . $order->get_id() . ' - Exception: ' . $e->getMessage() . ' - File: ' . basename($e->getFile()) . ' - Line: ' . $e->getLine(), 'error');
-				$error_txt = __( 'An error has occurred. Please verify the data entered and try again', 'wc_paytpv' ) . '. ' . __( 'Puedes probar PayPal como método alternativo', 'wc_paytpv' );
+				$error_txt = __( 'An error has occurred. Please verify the data entered and try again', 'wc_paytpv' ) . '. ' . PAYTPV_PAYPAL_ALTERNATIVE_MSG;
 				wc_add_notice($error_txt, 'error' );
 				$this->jetiframeOkUrl = $URLKO;
 				return false;
@@ -1855,7 +1891,7 @@
 						);
 			} catch (exception $e){
 				$this->write_log('⚠️ EXCEPTION CAUGHT IN EXECUTE PURCHASE - Order #' . $order->get_id() . ' - Exception: ' . $e->getMessage() . ' - File: ' . basename($e->getFile()) . ' - Line: ' . $e->getLine(), 'error');
-				$error_txt = __( 'An error has occurred. Please verify the data entered and try again', 'wc_paytpv' ) . '. ' . __( 'Puedes probar PayPal como método alternativo', 'wc_paytpv' );
+				$error_txt = __( 'An error has occurred. Please verify the data entered and try again', 'wc_paytpv' ) . '. ' . PAYTPV_PAYPAL_ALTERNATIVE_MSG;
 				wc_add_notice($error_txt, 'error' );
 				$this->jetiframeOkUrl = $URLKO;
 				return false;
@@ -1883,9 +1919,9 @@
 			$this->write_log('❌ PAYMENT ERROR - Order #' . $order->get_id() . ' - ' . $logDetails, 'error');
 			$error_description = get_error_description($executePurchaseResponse->errorCode);
 			if (is_user_friendly_error($executePurchaseResponse->errorCode)) {
-				$error_txt = $error_description . '. ' . __( 'Puedes probar PayPal como método alternativo', 'wc_paytpv' );
+				$error_txt = $error_description . '. ' . PAYTPV_PAYPAL_ALTERNATIVE_MSG;
 			} else {
-				$error_txt = __( 'An error has occurred. Please verify the data entered and try again', 'wc_paytpv' ) . '. ' . __( 'Puedes probar PayPal como método alternativo', 'wc_paytpv' );
+				$error_txt = __( 'An error has occurred. Please verify the data entered and try again', 'wc_paytpv' ) . '. ' . PAYTPV_PAYPAL_ALTERNATIVE_MSG;
 			}
 			wc_add_notice($error_txt, 'error' );
 			$this->jetiframeOkUrl = $URLKO;
@@ -1898,6 +1934,8 @@
 
 		} else {
 			$this->write_log('⚠️ MISSING API KEY - Order #' . $order->get_id() . ' - Cannot process payment without API key configured', 'error');
+			$error_txt = __( 'An error has occurred. Please verify the data entered and try again', 'wc_paytpv' ) . '. ' . PAYTPV_PAYPAL_ALTERNATIVE_MSG;
+			wc_add_notice($error_txt, 'error' );
 			$this->jetiframeOkUrl = $URLKO;
 			return false;
 		}
